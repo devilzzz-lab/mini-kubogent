@@ -11,6 +11,17 @@ of production EKS + GPU infrastructure.
 
 ---
 
+## 📚 Documentation
+
+| Doc | What it's for |
+|---|---|
+| [POC.md](./POC.md) | Motive, high-level plan, what "done" looks like, non-goals |
+| [setup.md](./setup.md) | Step-by-step commands to build this from scratch, Phase 0 → 5 |
+| [DEMO.md](./DEMO.md) | ~5 min end-to-end walkthrough script with talking points, for a live demo |
+| [DEBUG.md](./DEBUG.md) | Every real issue hit while building this, with root cause + fix |
+
+---
+
 ## Why this project exists
 
 Kubogent AI is Aivar's product for running enterprise AI/ML workloads on
