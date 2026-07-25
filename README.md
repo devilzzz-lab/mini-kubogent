@@ -13,6 +13,8 @@ of production EKS + GPU infrastructure.
 
 ## 📚 Documentation
 
+📸 **Demo screenshots**: [check the demos in this link](https://drive.google.com/drive/folders/1mOAK4CsDRJn_4k74K1YqgjyRlSRM2mbH?usp=sharing)
+
 | Doc | What it's for |
 |---|---|
 | [POC.md](./POC.md) | Motive, high-level plan, what "done" looks like, non-goals |
