@@ -120,9 +120,10 @@ GPU sharing.
 - Runs locally against the cluster (not yet containerized/deployed in-cluster)
 
 ### Phase 6 — Documentation & demo polish
-- Finalize README + POC
-- Record/demo: run pipeline → show registry update → hit live endpoint →
-  show audit log → show dashboard
+- Finalized README + POC + setup + debug docs
+- [DEMO.md](./DEMO.md) — a single end-to-end walkthrough script:
+  RBAC check → run pipeline → show registry update → hit live endpoint →
+  show audit log → show dashboard, with talking points for each step
 
 ---
 
@@ -212,7 +213,8 @@ dashboard here shows illustrative/mocked numbers, clearly labeled as such.
 
 ## Status
 
-🚧 In progress — see [POC.md](./POC.md) for the motive and plan.
+✅ All 6 phases complete — see [POC.md](./POC.md) for the motive and plan,
+and [DEMO.md](./DEMO.md) to walk through it end-to-end.
 
 - [x] Phase 0 — kind cluster + Argo Workflows installed
 - [x] Phase 1 (partial) — hello-world workflow validated end-to-end
@@ -221,7 +223,7 @@ dashboard here shows illustrative/mocked numbers, clearly labeled as such.
 - [x] Phase 3 — model serving (FastAPI inference service, live `/predict` endpoint)
 - [x] Phase 4 — governance (RBAC: viewer/runner ClusterRoles + PVC-backed audit log via Argo step)
 - [x] Phase 5 — dashboard (Streamlit, 4 tabs, all live except clearly-labeled simulated cost/GPU panel)
-- [ ] Phase 6 — docs & demo polish
+- [x] Phase 6 — docs & demo polish
 
 See [DEBUG.md](./DEBUG.md) for the full log of real issues hit and fixes
 applied while building this (RBAC, image pulls, Argo executor quirks,
@@ -263,8 +265,9 @@ just at local/CPU/single-node scale instead of EKS + GPU scale.
 mini-kubogent/
 ├── POC.md                 # motive, plan, non-goals
 ├── README.md               # this file
-├── setup.md                 # step-by-step environment setup (Phase 0+)
-├── DEBUG.md                  # full troubleshooting log
+├── DEMO.md                  # end-to-end walkthrough script
+├── setup.md                   # step-by-step environment setup (Phase 0+)
+├── DEBUG.md                    # full troubleshooting log
 ├── rbac/                      # Phase 4 - RBAC roles + audit log PVC
 │   ├── viewer-role.yaml
 │   ├── pipeline-runner-role.yaml
