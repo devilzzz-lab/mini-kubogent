@@ -239,18 +239,69 @@ Workflow — always set `command:` explicitly.
 
 ---
 
+## 10. Inference service `CrashLoopBackOff` — MLflow artifacts not shared between pods
+
+**Symptom**
+`inference-service` pod crashes on startup with:
+```
+OSError: No such file or directory:
+'/mlflow-data/artifacts/1/<run_id>/artifacts/model/.'
+```
+even though the model shows as registered in the MLflow UI.
+
+**Cause**
+The MLflow server was started with a plain local filesystem path as its
+artifact root (`--default-artifact-root=/mlflow-data/artifacts`). That
+path lives inside the `mlflow-server` pod's own `emptyDir` volume — it is
+**not shared with any other pod**. The training container (different pod)
+wrote model files there via the tracking API, but the MLflow *client*
+running inside `inference-service` (a separate pod, separate filesystem)
+tried to read that same local path directly and it simply didn't exist in
+its own container.
+
+**Fix**
+Enable MLflow's built-in artifact proxying, so clients fetch model files
+over HTTP through the tracking server instead of assuming shared local
+disk:
+```dockerfile
+ENTRYPOINT ["mlflow", "server", \
+    "--host=0.0.0.0", \
+    "--port=5000", \
+    "--backend-store-uri=sqlite:////mlflow-data/mlflow.db", \
+    "--serve-artifacts", \
+    "--artifacts-destination=/mlflow-data/artifacts", \
+    "--default-artifact-root=mlflow-artifacts:/"]
+```
+The `mlflow-artifacts:/` scheme is what tells any MLflow client (training
+container, inference service, notebooks, etc.) to route artifact
+read/write through the server's HTTP API rather than expecting direct
+filesystem access — this is the correct pattern any time the tracking
+server and its clients run in different pods/containers/machines.
+
+After rebuilding and redeploying MLflow with this change, retrained the
+model (registry data doesn't survive a pod restart since it's on
+`emptyDir` — expected for this POC, see note below) and restarted
+`inference-service`; it loaded the model successfully on the next attempt.
+
+> Note on persistence: `emptyDir` storage means all MLflow data (runs,
+> registered models, artifacts) is lost if the `mlflow-server` pod
+> restarts or is rescheduled. That's an accepted limitation for this local
+> learning POC. In a real deployment, this would use a `PersistentVolume`
+> (or, in production Kubogent-style setups, S3/cloud object storage as the
+> artifact backend) instead of `emptyDir`.
+
+---
+
 ## Phase 3 notes — Inference Service
 
-No new blocking issues were hit building the FastAPI serving layer, since
-the same patterns from Phases 1–2 applied directly:
-- Built the image the same way (`docker build` → `kind load docker-image ... --name cloudops`)
-- Deployed with `imagePullPolicy: Never`, same as the training image
-- Set a `readinessProbe` on `/health` so `kubectl get pods` accurately
-  reflects when the model has actually finished loading from MLflow
-  (model loading happens on FastAPI startup via `mlflow.pyfunc.load_model`,
-  which takes a few seconds — without the probe, the pod would show
-  `Running` before it can actually serve predictions)
+Built and deployed the same way as prior images (`docker build` →
+`kind load docker-image ... --name cloudops`), with `imagePullPolicy: Never`
+and a `readinessProbe` on `/health` so `kubectl get pods` accurately
+reflects when the model has actually finished loading from MLflow (model
+loading happens on FastAPI startup via `mlflow.pyfunc.load_model`, which
+takes a few seconds).
 
-If you hit an image-related error here, check issue #9 above first — same
-class of problem tends to recur with any newly-built local image used in
-Argo or plain Kubernetes Deployments.
+The blocking issue hit here was #10 above (MLflow artifacts not shared
+between pods). Once fixed, the full loop worked cleanly:
+train → register (Argo + training container) → serve (FastAPI) →
+`POST /predict` returns a live prediction.

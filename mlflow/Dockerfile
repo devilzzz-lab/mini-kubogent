@@ -8,4 +8,6 @@ ENTRYPOINT ["mlflow", "server", \
     "--host=0.0.0.0", \
     "--port=5000", \
     "--backend-store-uri=sqlite:////mlflow-data/mlflow.db", \
-    "--default-artifact-root=/mlflow-data/artifacts"]
+    "--serve-artifacts", \
+    "--artifacts-destination=/mlflow-data/artifacts", \
+    "--default-artifact-root=mlflow-artifacts:/"]
