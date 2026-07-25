@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: train-iris-model-
+  namespace: argo
+spec:
+  entrypoint: train-and-register
+  templates:
+    - name: train-and-register
+      container:
+        image: mini-kubogent/train:latest
+        imagePullPolicy: Never   # image is loaded directly into kind, not pulled
+        command: ["python", "train.py"]
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "http://mlflow-server.mlflow.svc.cluster.local:5000"
+          - name: MLFLOW_EXPERIMENT
+            value: "mini-kubogent"
+          - name: N_ESTIMATORS
+            value: "50"
+          - name: MAX_DEPTH
+            value: "5"
+          - name: MIN_ACCURACY
+            value: "0.85"

@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mlflow
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-server
+  namespace: mlflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow-server
+  template:
+    metadata:
+      labels:
+        app: mlflow-server
+    spec:
+      containers:
+        - name: mlflow-server
+          image: mini-kubogent/mlflow:latest
+          imagePullPolicy: Never   # image is loaded directly into kind, not pulled
+          ports:
+            - containerPort: 5000
+          volumeMounts:
+            - name: mlflow-storage
+              mountPath: /mlflow-data
+      volumes:
+        - name: mlflow-storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-server
+  namespace: mlflow
+spec:
+  selector:
+    app: mlflow-server
+  ports:
+    - port: 5000
+      targetPort: 5000
+  type: ClusterIP
