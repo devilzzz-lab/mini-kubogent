@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.Python
+
+# MLflow
+mlruns/
+mlartifacts/
+mlflow.db
+
+# Kind / kubeconfig
+kubeconfig*
+*.kubeconfig
+.kube/
+
+# Docker
+*.log
+
+# Argo
+argo-artifacts/
+
+# OS/editor junk
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Env / secrets
+.env
+*.env.local
+secrets.yaml
