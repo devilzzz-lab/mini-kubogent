@@ -38,7 +38,7 @@ GPU sharing.
 | # | Kubogent Feature (from aivar.tech) | In this project? | How |
 |---|---|---|---|
 | 1 | EKS (Kubernetes on AWS) | ⚠️ Simulated | `kind` cluster locally instead of EKS |
-| 2 | Cluster Dashboard | 🔜 In progress | Streamlit dashboard reading K8s + MLflow APIs |
+| 2 | Cluster Dashboard | ✅ Built | Streamlit dashboard reading K8s + MLflow APIs |
 | 3 | Model Workbench (fine-tuning) | ✅ Built (tiny scale) | CPU-only small model training step in pipeline |
 | 4 | Model Catalog (registry) | ✅ Built | MLflow tracking + model registry |
 | 5 | Pipeline Designer (Argo-backed) | ✅ Built | Argo Workflows (used directly, no visual UI builder) |
@@ -108,11 +108,16 @@ GPU sharing.
   just successes
 
 ### Phase 5 — Dashboard
-- Build a Streamlit app that shows:
-  - Live pod/job status (via Kubernetes API)
-  - Registered model versions (via MLflow API)
-  - The audit log from Phase 4 (who/when/what ran)
-  - A clearly-labeled "simulated" GPU utilization / cost panel
+- Streamlit app (`dashboard/app.py`) with 4 tabs, all reading live cluster state:
+  - **Pipeline Status** — pods in the `argo` namespace via the Kubernetes API
+    (workflow, phase, node, start time)
+  - **Model Registry** — full version history from MLflow (model, version,
+    stage, run_id, status)
+  - **Audit Log** — the Phase 4 governance trail, read from the PVC via a
+    throwaway pod, same pattern used manually in setup.md
+  - **Cost / GPU** — clearly labeled **SIMULATED**; no real GPU or cloud
+    billing exists on a local kind cluster
+- Runs locally against the cluster (not yet containerized/deployed in-cluster)
 
 ### Phase 6 — Documentation & demo polish
 - Finalize README + POC
@@ -201,7 +206,7 @@ dashboard here shows illustrative/mocked numbers, clearly labeled as such.
 - **Model Registry**: MLflow
 - **Serving**: FastAPI + Kubernetes Deployment/Service
 - **Governance**: Kubernetes RBAC (ClusterRoles + ServiceAccounts) + PVC-backed audit log
-- **Dashboard**: Streamlit *(in progress)*
+- **Dashboard**: Streamlit
 
 ---
 
@@ -215,19 +220,21 @@ dashboard here shows illustrative/mocked numbers, clearly labeled as such.
 - [x] Phase 2 — MLflow model registry (self-built image, in-cluster, model registered and versioned)
 - [x] Phase 3 — model serving (FastAPI inference service, live `/predict` endpoint)
 - [x] Phase 4 — governance (RBAC: viewer/runner ClusterRoles + PVC-backed audit log via Argo step)
-- [ ] Phase 5 — dashboard
+- [x] Phase 5 — dashboard (Streamlit, 4 tabs, all live except clearly-labeled simulated cost/GPU panel)
 - [ ] Phase 6 — docs & demo polish
 
 See [DEBUG.md](./DEBUG.md) for the full log of real issues hit and fixes
 applied while building this (RBAC, image pulls, Argo executor quirks,
-kubectl context handling, etc.) — kept separate to keep this README
-focused on what the project is and how it works.
+kubectl context handling, Python/pip environment chaos, etc.) — kept
+separate to keep this README focused on what the project is and how it
+works.
 
 ---
 
 ## What's Actually Running Right Now
 
-As of Phase 4, the full loop is live on the local kind cluster:
+As of Phase 5, the full loop is live on the local kind cluster, plus a
+dashboard observing all of it:
 
 1. **Argo Workflow** (`train-iris-model.yaml`) runs as the `mini-kubogent-runner`
    ServiceAccount and executes the `training/` container
@@ -243,9 +250,12 @@ As of Phase 4, the full loop is live on the local kind cluster:
    record (who/what/when/model version/accuracy/status) to a PVC-backed
    `audit.log` — surviving pod restarts, and capturing failed quality-gate
    runs too, not just successes
+6. The **Streamlit dashboard** (`dashboard/app.py`) reads all of the above
+   live — pod status, the full MLflow version history, and the audit
+   trail — plus a clearly-labeled simulated GPU/cost panel
 
-This mirrors Kubogent's TRAIN → GOVERN → SERVE flow end-to-end, just at
-local/CPU/single-node scale instead of EKS + GPU scale.
+This mirrors Kubogent's TRAIN → GOVERN → SERVE → OBSERVE flow end-to-end,
+just at local/CPU/single-node scale instead of EKS + GPU scale.
 
 ## Repository Structure
 
@@ -274,6 +284,9 @@ mini-kubogent/
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── deployment.yaml
-├── dashboard/                         # Cluster Dashboard (Phase 5, in progress)
+├── dashboard/                         # Cluster Dashboard (Phase 5)
+│   ├── app.py                          # Streamlit app - 4 tabs, live data
+│   ├── requirements.txt                 # pinned to match MLflow server (2.14.1)
+│   └── README.md                         # how to run it, env vars
 └── scripts/                            # helper scripts
 ```

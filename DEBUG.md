@@ -293,8 +293,95 @@ model (registry data doesn't survive a pod restart since it's on
 > repeating the same `emptyDir` mistake.
 
 ---
-
 ## Phase 3 notes — Inference Service
+
+<<<PLACEHOLDER>>> (multi-layered Python environment issue)
+
+**Symptom**
+The Streamlit dashboard's Pipeline Status, Audit Log, and Cost/GPU tabs
+all worked correctly (confirming Kubernetes API and subprocess access were
+fine), but Model Registry showed "No registered models yet" even though
+`curl http://localhost:5000/api/2.0/mlflow/registered-models/search`
+against the same port-forwarded endpoint clearly returned the model.
+
+This took several rounds to fully resolve because it was actually **four
+separate, stacked issues** on macOS, each masking the next:
+
+**Layer 1 — `pip`/`pip3`/`python3` pointed at different Python installs.**
+`pip install -r requirements.txt --break-system-packages` reported
+success, but `python3 -c "import mlflow"` failed with `ModuleNotFoundError`.
+`which python3` / `which pip3` showed two entirely different install
+locations (Homebrew Python vs. a python.org framework install). Packages
+were going into one interpreter; the code was running in another.
+**Fix:** use an isolated `venv`, always activate it, and always verify
+`which python3` points inside the venv before doing anything else.
+
+**Layer 2 — `venv` defaulted to a too-new Python (3.14).**
+A fresh `python3 -m venv .venv` picked up Python 3.14, which has no
+`numpy<2` wheels available yet (a hard requirement of `mlflow==2.14.1`),
+causing the pinned mlflow install to silently fail and leave a
+newer/wrong mlflow version in place instead.
+**Fix:** create the venv with an explicit older interpreter:
+`/opt/homebrew/bin/python3.12 -m venv .venv`.
+
+**Layer 3 — MLflow client/server version mismatch.**
+Even in a clean venv, an unpinned `mlflow>=2.14.1` requirement resolved to
+`mlflow 3.14.0`, while the in-cluster MLflow **server** was `2.14.1`
+(confirmed in the MLflow UI). MLflow 3.x changed the model registry
+API/behavior (deprecating stage-based `latest_versions` in favor of
+aliases), so a 3.x client talking to a 2.14.1 server returned an empty
+list from `search_registered_models()` / `search_model_versions()` with
+**no exception at all** — it looked like "no models" rather than "wrong
+client version." Confirmed via a direct diagnostic script printing
+`mlflow.__version__` and the actual registry query results.
+**Fix:** pin `mlflow==2.14.1` exactly, matching the server. General rule:
+an MLflow client talking to a self-hosted server should always be pinned
+to the same version as that server — don't rely on `>=`.
+
+**Layer 4 — pinning `mlflow==2.14.1` then conflicted with an unrelated
+`pyarrow>=17.0` pin** (`mlflow 2.14.1` requires `pyarrow<16`) — removed
+the unnecessary pyarrow pin and let mlflow's own constraint resolve it.
+
+**Layer 5 — modern `setuptools` (83.x) dropped `pkg_resources`,** which
+`mlflow==2.14.1` still imports internally (`ModuleNotFoundError: No
+module named 'pkg_resources'`), because Python 3.12+ `venv` no longer
+bundles `setuptools` and a plain `pip install setuptools` grabs the
+latest (`pkg_resources`-free) release.
+**Fix:** pin `setuptools<81` in requirements.txt, which still includes
+`pkg_resources` (with a deprecation warning, not an error).
+
+**Layer 6 — even after all the above was fixed, the running Streamlit
+process still showed stale (empty) results,** because it had already
+imported the broken `mlflow` when it first started; Streamlit's
+browser-side rerun (pressing `R`) does not restart the underlying Python
+process or re-import already-loaded modules.
+**Fix:** fully stop (`Ctrl+C`) and restart `streamlit run app.py` after
+any environment change, not just refresh the browser tab.
+
+**Layer 7 — `which streamlit` still resolved to a non-venv install**
+(`/Library/Frameworks/Python.framework/...`) even with the venv activated
+and `which python3`/`which pip3` correctly pointing inside it — the same
+PATH-precedence issue as Layer 1, but for the `streamlit` console script
+specifically.
+**Fix:** never invoke bare `streamlit`; always run it as a module through
+the venv's own interpreter: `python3 -m streamlit run app.py`.
+
+**Bonus code bug found along the way:** an earlier workaround (written
+while still on the mismatched mlflow 3.x client, before Layer 3 was
+diagnosed) switched `load_model_registry()` from a
+`search_model_versions(filter_string=...)` query to reading
+`rm.latest_versions` directly, to route around what looked like a broken
+filter query. That masked the real client/server mismatch and, as a side
+effect, only ever showed the single latest model version instead of full
+version history. Once the client was correctly pinned to `2.14.1`, the
+original filter-based query worked fine and was restored.
+
+**Lesson for next time:** on macOS specifically, always verify `which
+python3`, `which pip3`, and `which <any-cli-tool-being-installed>` inside
+an activated venv before debugging "why isn't my code seeing this
+package" — the vast majority of these symptoms were PATH/interpreter
+mismatches, not application bugs, and each one perfectly disguised itself
+as the next layer's problem.
 
 Built and deployed the same way as prior images (`docker build` →
 `kind load docker-image ... --name cloudops`), with `imagePullPolicy: Never`
@@ -307,8 +394,6 @@ The blocking issue hit here was #10 above (MLflow artifacts not shared
 between pods). Once fixed, the full loop worked cleanly:
 train → register (Argo + training container) → serve (FastAPI) →
 `POST /predict` returns a live prediction.
-
----
 
 ## Phase 4 notes — Governance (RBAC + Audit Log)
 
@@ -333,3 +418,93 @@ decisions worth recording:
   Workflow template picks them up via `outputs.parameters[].valueFrom.path`
   — the standard Argo pattern for passing structured data between steps,
   avoiding fragile log-scraping.
+
+---
+
+## Phase 5 notes — Dashboard (multi-layered Python environment issue)
+
+**Symptom**
+The Streamlit dashboard's Pipeline Status, Audit Log, and Cost/GPU tabs
+all worked correctly (confirming Kubernetes API and subprocess access were
+fine), but Model Registry showed "No registered models yet" even though
+`curl http://localhost:5000/api/2.0/mlflow/registered-models/search`
+against the same port-forwarded endpoint clearly returned the model.
+
+This took several rounds to fully resolve because it was actually **seven
+separate, stacked issues** on macOS, each masking the next:
+
+**Layer 1 — `pip`/`pip3`/`python3` pointed at different Python installs.**
+`pip install -r requirements.txt --break-system-packages` reported
+success, but `python3 -c "import mlflow"` failed with `ModuleNotFoundError`.
+`which python3` / `which pip3` showed two entirely different install
+locations (Homebrew Python vs. a python.org framework install). Packages
+were going into one interpreter; the code was running in another.
+**Fix:** use an isolated `venv`, always activate it, and always verify
+`which python3` points inside the venv before doing anything else.
+
+**Layer 2 — `venv` defaulted to a too-new Python (3.14).**
+A fresh `python3 -m venv .venv` picked up Python 3.14, which has no
+`numpy<2` wheels available yet (a hard requirement of `mlflow==2.14.1`),
+causing the pinned mlflow install to silently fail and leave a
+newer/wrong mlflow version in place instead.
+**Fix:** create the venv with an explicit older interpreter:
+`/opt/homebrew/bin/python3.12 -m venv .venv`.
+
+**Layer 3 — MLflow client/server version mismatch.**
+Even in a clean venv, an unpinned `mlflow>=2.14.1` requirement resolved to
+`mlflow 3.14.0`, while the in-cluster MLflow **server** was `2.14.1`
+(confirmed in the MLflow UI). MLflow 3.x changed the model registry
+API/behavior (deprecating stage-based `latest_versions` in favor of
+aliases), so a 3.x client talking to a 2.14.1 server returned an empty
+list from `search_registered_models()` / `search_model_versions()` with
+**no exception at all** — it looked like "no models" rather than "wrong
+client version." Confirmed via a direct diagnostic script printing
+`mlflow.__version__` and the actual registry query results.
+**Fix:** pin `mlflow==2.14.1` exactly, matching the server. General rule:
+an MLflow client talking to a self-hosted server should always be pinned
+to the same version as that server — don't rely on `>=`.
+
+**Layer 4 — pinning `mlflow==2.14.1` then conflicted with an unrelated
+`pyarrow>=17.0` pin** (`mlflow 2.14.1` requires `pyarrow<16`) — removed
+the unnecessary pyarrow pin and let mlflow's own constraint resolve it.
+
+**Layer 5 — modern `setuptools` (83.x) dropped `pkg_resources`,** which
+`mlflow==2.14.1` still imports internally (`ModuleNotFoundError: No
+module named 'pkg_resources'`), because Python 3.12+ `venv` no longer
+bundles `setuptools` and a plain `pip install setuptools` grabs the
+latest (`pkg_resources`-free) release.
+**Fix:** pin `setuptools<81` in requirements.txt, which still includes
+`pkg_resources` (with a deprecation warning, not an error).
+
+**Layer 6 — even after all the above was fixed, the running Streamlit
+process still showed stale (empty) results,** because it had already
+imported the broken `mlflow` when it first started; Streamlit's
+browser-side rerun (pressing `R`) does not restart the underlying Python
+process or re-import already-loaded modules.
+**Fix:** fully stop (`Ctrl+C`) and restart `streamlit run app.py` after
+any environment change, not just refresh the browser tab.
+
+**Layer 7 — `which streamlit` still resolved to a non-venv install**
+(`/Library/Frameworks/Python.framework/...`) even with the venv activated
+and `which python3`/`which pip3` correctly pointing inside it — the same
+PATH-precedence issue as Layer 1, but for the `streamlit` console script
+specifically.
+**Fix:** never invoke bare `streamlit`; always run it as a module through
+the venv's own interpreter: `python3 -m streamlit run app.py`.
+
+**Bonus code bug found along the way:** an earlier workaround (written
+while still on the mismatched mlflow 3.x client, before Layer 3 was
+diagnosed) switched `load_model_registry()` from a
+`search_model_versions(filter_string=...)` query to reading
+`rm.latest_versions` directly, to route around what looked like a broken
+filter query. That masked the real client/server mismatch and, as a side
+effect, only ever showed the single latest model version instead of full
+version history. Once the client was correctly pinned to `2.14.1`, the
+original filter-based query worked fine and was restored.
+
+**Lesson for next time:** on macOS specifically, always verify `which
+python3`, `which pip3`, and `which <any-cli-tool-being-installed>` inside
+an activated venv before debugging "why isn't my code seeing this
+package" — the vast majority of these symptoms were PATH/interpreter
+mismatches, not application bugs, and each one perfectly disguised itself
+as the next layer's problem.

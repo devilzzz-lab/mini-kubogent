@@ -271,3 +271,86 @@ Phase 5 (Streamlit dashboard) next.
 If anything here fails, check [DEBUG.md](./DEBUG.md) first — most issues
 that come up repeating this setup have already been hit and documented
 there.
+
+---
+
+## Phase 5 — Cluster Dashboard (Streamlit)
+
+Runs **locally** on your laptop (not deployed in-cluster), reading live
+data from the Kubernetes API, MLflow, and the audit log PVC.
+
+### Set up an isolated Python environment
+
+Use a `venv` — don't rely on bare `pip`/`python3`, since on macOS these
+can silently point at different Python installs depending on how many
+you have (Homebrew, python.org, Xcode CLT, etc). See DEBUG.md #11 for the
+full story if you hit anything odd here.
+
+```bash
+cd dashboard
+
+# use Python 3.12 explicitly - mlflow==2.14.1 requires numpy<2, which has
+# no wheels for very new Python versions (3.13/3.14) yet
+/opt/homebrew/bin/python3.12 -m venv .venv
+source .venv/bin/activate
+python3 --version   # confirm: Python 3.12.x
+```
+
+### Install dependencies
+
+```bash
+pip install -r requirements.txt --only-binary=:all:
+```
+
+`mlflow` is pinned to `==2.14.1` to **exactly match the MLflow server
+version** running in-cluster — a mismatched client (e.g. pip resolving to
+MLflow 3.x) will silently return zero registered models even though the
+REST API works fine, since MLflow 3.x changed the registry API.
+
+### Verify the environment before running the app
+
+```bash
+python3 -c "
+import mlflow
+print('mlflow version:', mlflow.__version__)
+from mlflow.tracking import MlflowClient
+c = MlflowClient(tracking_uri='http://localhost:5000')
+models = c.search_registered_models()
+print('models found:', len(models))
+"
+```
+Expect `mlflow version: 2.14.1` and `models found: 1` (assuming MLflow
+port-forward below is already running and at least one training run has
+completed).
+
+### Run it
+
+Keep MLflow port-forwarded in its own terminal:
+```bash
+kubectl -n mlflow port-forward svc/mlflow-server 5000:5000
+```
+
+In another terminal, **inside the activated venv**, launch Streamlit
+through the venv's Python explicitly — a bare `streamlit` command can
+resolve to a different (non-venv) install on macOS, same PATH trap as
+`pip`/`python3`:
+```bash
+cd dashboard
+source .venv/bin/activate
+python3 -m streamlit run app.py
+```
+
+Opens at `http://localhost:8501`. Four tabs:
+- **Pipeline Status** — live pods in the `argo` namespace
+- **Model Registry** — full MLflow version history
+- **Audit Log** — the Phase 4 governance trail (same throwaway-pod
+  pattern used manually above)
+- **Cost / GPU** — clearly labeled simulated
+
+See `dashboard/README.md` for config env vars (cluster context, MLflow
+URI, etc).
+
+---
+
+✅ At this point: the full TRAIN → GOVERN → SERVE → OBSERVE loop is live
+and observable end-to-end. Move on to Phase 6 (docs & demo polish) next.
