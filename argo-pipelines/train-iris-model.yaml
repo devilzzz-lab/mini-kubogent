@@ -4,9 +4,36 @@ metadata:
   generateName: train-iris-model-
   namespace: argo
 spec:
-  entrypoint: train-and-register
+  entrypoint: train-then-audit
+  serviceAccountName: mini-kubogent-runner
+
   templates:
+    - name: train-then-audit
+      steps:
+        - - name: train
+            template: train-and-register
+            continueOn:
+              failed: true   # let a failed quality-gate run still reach the audit step
+        - - name: audit
+            template: log-audit
+            arguments:
+              parameters:
+                - name: accuracy
+                  value: "{{steps.train.outputs.parameters.accuracy}}"
+                - name: model-version
+                  value: "{{steps.train.outputs.parameters.model-version}}"
+                - name: train-status
+                  value: "{{steps.train.status}}"
+
     - name: train-and-register
+      outputs:
+        parameters:
+          - name: accuracy
+            valueFrom:
+              path: /tmp/outputs/accuracy.txt
+          - name: model-version
+            valueFrom:
+              path: /tmp/outputs/model_version.txt
       container:
         image: mini-kubogent/train:latest
         imagePullPolicy: Never   # image is loaded directly into kind, not pulled
@@ -22,3 +49,25 @@ spec:
             value: "5"
           - name: MIN_ACCURACY
             value: "0.85"
+
+    - name: log-audit
+      inputs:
+        parameters:
+          - name: accuracy
+          - name: model-version
+          - name: train-status
+      volumes:
+        - name: audit-log
+          persistentVolumeClaim:
+            claimName: audit-log-pvc
+      container:
+        image: busybox:latest
+        volumeMounts:
+          - name: audit-log
+            mountPath: /audit
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ),sa={{workflow.serviceAccountName}},workflow={{workflow.name}},status={{inputs.parameters.train-status}},model_version={{inputs.parameters.model-version}},accuracy={{inputs.parameters.accuracy}}" >> /audit/audit.log
+            echo "Audit entry written:"
+            tail -n 1 /audit/audit.log

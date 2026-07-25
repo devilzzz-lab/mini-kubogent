@@ -84,10 +84,10 @@ kubectl create clusterrolebinding workflowtaskresults-binding \
 ```
 
 > Production note: granting this to the `default` service account is fine
-> for a local learning cluster. In a real Kubogent-style production setup,
-> each pipeline/tenant would run under its own narrowly-scoped service
-> account instead — exactly what the "GOVERN" pillar (Phase 4 here) is
-> meant to enforce.
+> for a local learning cluster. Phase 4 replaces this pattern for actual
+> pipeline runs — the training Workflow now runs under its own
+> narrowly-scoped `mini-kubogent-runner` service account instead of
+> `default`, which is exactly what the "GOVERN" pillar is meant to enforce.
 
 ---
 
@@ -288,7 +288,9 @@ model (registry data doesn't survive a pod restart since it's on
 > restarts or is rescheduled. That's an accepted limitation for this local
 > learning POC. In a real deployment, this would use a `PersistentVolume`
 > (or, in production Kubogent-style setups, S3/cloud object storage as the
-> artifact backend) instead of `emptyDir`.
+> artifact backend) instead of `emptyDir`. This is exactly why the Phase 4
+> audit log (below) was deliberately built on a real PVC instead of
+> repeating the same `emptyDir` mistake.
 
 ---
 
@@ -305,3 +307,29 @@ The blocking issue hit here was #10 above (MLflow artifacts not shared
 between pods). Once fixed, the full loop worked cleanly:
 train → register (Argo + training container) → serve (FastAPI) →
 `POST /predict` returns a live prediction.
+
+---
+
+## Phase 4 notes — Governance (RBAC + Audit Log)
+
+No blocking issues this phase — ran clean on the first submit. Two design
+decisions worth recording:
+
+- **Audit log on a PVC, not `emptyDir`.** Given issue #10 above, the audit
+  log step was deliberately backed by a `PersistentVolumeClaim`
+  (`rbac/audit-pvc.yaml`) from the start, not a per-pod `emptyDir`. An
+  audit trail that vanishes when a pod is rescheduled defeats its own
+  purpose.
+- **`continueOn: failed` on the train step.** Without this, a training run
+  that fails the accuracy quality gate (`sys.exit(1)`) would mark the whole
+  Workflow `Failed` and Argo would skip the downstream `audit` step
+  entirely — meaning failed runs would never make it into the compliance
+  record. `continueOn: failed: true` lets the audit step run regardless,
+  and it records the real `train-status` (`Succeeded` / `Failed`) in the
+  log line, which is closer to how a real governance system needs to
+  behave: failures need a paper trail too, not just successes.
+- **Outputs wired via files, not stdout parsing.** `train.py` writes
+  `accuracy.txt` and `model_version.txt` to `/tmp/outputs/`, and the
+  Workflow template picks them up via `outputs.parameters[].valueFrom.path`
+  — the standard Argo pattern for passing structured data between steps,
+  avoiding fragile log-scraping.

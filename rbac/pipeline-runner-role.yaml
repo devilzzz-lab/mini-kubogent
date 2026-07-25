@@ -1,0 +1,32 @@
+# Pipeline-runner role — can submit/watch/delete workflows (run pipelines),
+# but has no broader cluster access (no RBAC edits, no secrets, etc).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mini-kubogent-runner
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflowtemplates", "workflowtaskresults"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mini-kubogent-runner
+  namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mini-kubogent-runner-binding
+subjects:
+  - kind: ServiceAccount
+    name: mini-kubogent-runner
+    namespace: argo
+roleRef:
+  kind: ClusterRole
+  name: mini-kubogent-runner
+  apiGroup: rbac.authorization.k8s.io

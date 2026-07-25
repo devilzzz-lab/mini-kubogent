@@ -17,9 +17,10 @@ Kubogent AI is Aivar's product for running enterprise AI/ML workloads on
 Kubernetes (EKS), with governance, GPU management, and MLOps tooling built
 in. Reading their marketing page alone doesn't teach you how the pieces
 actually work — so this project rebuilds the *core mechanics* (pipeline →
-registry → serving → dashboard) locally, using the same open-source
-building blocks Kubogent is very likely built on (Argo, MLflow, Kubernetes
-primitives), so the concepts can be demonstrated and explained properly.
+registry → serving → governance → dashboard) locally, using the same
+open-source building blocks Kubogent is very likely built on (Argo,
+MLflow, Kubernetes primitives), so the concepts can be demonstrated and
+explained properly.
 
 ## What Kubogent actually does (recap)
 
@@ -37,7 +38,7 @@ GPU sharing.
 | # | Kubogent Feature (from aivar.tech) | In this project? | How |
 |---|---|---|---|
 | 1 | EKS (Kubernetes on AWS) | ⚠️ Simulated | `kind` cluster locally instead of EKS |
-| 2 | Cluster Dashboard | ✅ Built | Streamlit dashboard reading K8s + MLflow APIs |
+| 2 | Cluster Dashboard | 🔜 In progress | Streamlit dashboard reading K8s + MLflow APIs |
 | 3 | Model Workbench (fine-tuning) | ✅ Built (tiny scale) | CPU-only small model training step in pipeline |
 | 4 | Model Catalog (registry) | ✅ Built | MLflow tracking + model registry |
 | 5 | Pipeline Designer (Argo-backed) | ✅ Built | Argo Workflows (used directly, no visual UI builder) |
@@ -46,7 +47,7 @@ GPU sharing.
 | 8 | Micro-VM Isolation | ❌ Not built | Conceptual only — see below |
 | 9 | Service Mesh for AI | ❌ Not built | Conceptual only — see below |
 | 10 | Multi-cloud / zero lock-in | ❌ Not built | Conceptual only — see below |
-| 11 | RBAC + audit logs | ✅ Built (basic) | K8s RBAC roles + simple pipeline run log |
+| 11 | RBAC + audit logs | ✅ Built | K8s RBAC (viewer/runner ClusterRoles) + persistent audit log via Argo step |
 | 12 | Kubeflow / MLflow / Argo compatibility | ⚠️ Partial | MLflow + Argo used; Kubeflow explained, not installed |
 | 13 | Cost visibility / predictable billing | ⚠️ Mocked | Dashboard shows illustrative numbers, not real billing |
 
@@ -73,8 +74,8 @@ GPU sharing.
 ## Project Phases
 
 ### Phase 0 — Environment setup
-- Install `kind`, `kubectl`, `docker`, `helm`
-- Create local cluster: `kind create cluster --name mini-kubogent`
+- Install `kind`, `kubectl`, `docker`, `argo`
+- Create local cluster: `kind create cluster --name cloudops`
 
 ### Phase 1 — Pipeline orchestration (Argo Workflows)
 - Install Argo Workflows on the cluster
@@ -82,7 +83,7 @@ GPU sharing.
 - Trigger and verify a run via `argo submit`
 
 ### Phase 2 — Model registry (MLflow)
-- Deploy MLflow tracking server in-cluster
+- Deploy MLflow tracking server in-cluster (self-built image, artifact proxying enabled)
 - Pipeline logs metrics, parameters, and registers the trained model
 - Verify model version appears in the MLflow UI
 
@@ -92,19 +93,31 @@ GPU sharing.
 - Test with a `curl`/Postman request to get a live prediction
 
 ### Phase 4 — Governance basics
-- Apply Kubernetes RBAC roles (e.g. read-only vs. pipeline-runner roles)
-- Log every pipeline run (who/when/what model version) to a simple audit
-  log file or table
+- Two ClusterRoles: `mini-kubogent-viewer` (read-only: pods, workflows, deployments)
+  and `mini-kubogent-runner` (can submit/watch/delete workflows) — each bound to
+  its own ServiceAccount in the `argo` namespace
+- Training pipeline runs as `mini-kubogent-runner`, proving the least-privilege
+  model actually gates real access (`kubectl auth can-i` verified both roles)
+- A `log-audit` step appended to the training Workflow writes one line per run
+  (timestamp, service account, workflow name, run status, model version,
+  accuracy) to `/audit/audit.log`, backed by a **PersistentVolumeClaim** so the
+  trail survives pod restarts (unlike MLflow's original `emptyDir` setup — see
+  DEBUG.md #10)
+- `continueOn: failed` on the train step ensures a run that fails the quality
+  gate is still logged — a real compliance trail records failures too, not
+  just successes
 
 ### Phase 5 — Dashboard
 - Build a Streamlit app that shows:
   - Live pod/job status (via Kubernetes API)
   - Registered model versions (via MLflow API)
+  - The audit log from Phase 4 (who/when/what ran)
   - A clearly-labeled "simulated" GPU utilization / cost panel
 
 ### Phase 6 — Documentation & demo polish
 - Finalize README + POC
-- Record/demo: run pipeline → show registry update → hit live endpoint → show dashboard
+- Record/demo: run pipeline → show registry update → hit live endpoint →
+  show audit log → show dashboard
 
 ---
 
@@ -142,8 +155,8 @@ this is used for things like canary-deploying a new model version,
 routing a percentage of traffic to it, and monitoring latency/errors per
 model version automatically. Istio *can* run on `kind`, but is deliberately
 left out of this POC to keep it lightweight and fast to build; the
-orchestration and registry pieces demonstrate the same underlying
-platform-engineering skill.
+orchestration, registry, and governance pieces demonstrate the same
+underlying platform-engineering skill.
 
 ### Micro-VM Isolation
 Technologies like **Firecracker** (used by AWS Lambda/Fargate) or **Kata
@@ -187,71 +200,10 @@ dashboard here shows illustrative/mocked numbers, clearly labeled as such.
 - **Orchestration**: Argo Workflows
 - **Model Registry**: MLflow
 - **Serving**: FastAPI + Kubernetes Deployment/Service
-- **Dashboard**: Streamlit
-- **Governance**: Kubernetes RBAC + simple audit log
+- **Governance**: Kubernetes RBAC (ClusterRoles + ServiceAccounts) + PVC-backed audit log
+- **Dashboard**: Streamlit *(in progress)*
 
-## Status
-
-🚧 In progress — see POC.md for scope, and phase checklist above for
-current progress.
-
-- [x] Phase 0 — kind cluster + Argo Workflows installed
-- [x] Phase 1 (partial) — hello-world workflow validated end-to-end
-- [x] Phase 1 (full) — train/evaluate/register pipeline (custom Docker image, Argo Workflow)
-- [x] Phase 2 — MLflow model registry (self-built image, in-cluster, model registered and versioned)
-- [ ] Phase 3 — model serving
-- [ ] Phase 4 — governance (RBAC + audit log)
-- [ ] Phase 5 — dashboard
-- [ ] Phase 6 — docs & demo polish
-
-See [DEBUG.md](./DEBUG.md) for the full log of real issues hit and fixes
-applied while building this (RBAC, image pulls, Argo executor quirks,
-kubectl context handling, etc.) — kept separate to keep this README
-focused on what the project is and how it works.
-
-## Repository Structure
-
-```
-mini-kubogent/
-├── POC.md              # motive, plan, non-goals
-├── README.md            # this file
-├── setup.md             # step-by-step environment setup (Phase 0+)
-├── DEBUG.md              # full troubleshooting log
-├── argo-pipelines/       # Argo Workflow YAMLs
-│   ├── hello-world.yaml
-│   └── train-iris-model.yaml
-├── mlflow/               # MLflow server image + K8s manifests
-│   ├── Dockerfile
-│   └── mlflow-deployment.yaml
-├── training/              # Model Workbench - training container
-│   ├── train.py
-│   ├── requirements.txt
-│   └── Dockerfile
-├── inference-service/     # SERVE use case - FastAPI model endpoint
-│   ├── main.py
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── deployment.yaml
-├── dashboard/              # Cluster Dashboard (Phase 5, in progress)
-└── scripts/                # helper scripts
-```
-
-## What's Actually Running Right Now
-
-As of Phase 3, the full loop is live on the local kind cluster:
-
-1. **Argo Workflow** (`train-iris-model.yaml`) runs the `training/` container
-2. Training container trains a RandomForest on Iris, logs metrics/params to
-   **MLflow**, registers the model as `mini-kubogent-iris-classifier`, and
-   fails the pipeline if accuracy drops below a quality-gate threshold
-3. **MLflow** (self-built image, in-cluster, SQLite-backed) stores the
-   experiment run and the model registry
-4. **Inference Service** (FastAPI, `inference-service/`) loads the latest
-   registered model version from MLflow on startup and serves it via
-   `POST /predict`
-
-This mirrors Kubogent's TRAIN → GOVERN → SERVE flow end-to-end, just at
-local/CPU/single-node scale instead of EKS + GPU scale.
+---
 
 ## Status
 
@@ -262,6 +214,66 @@ local/CPU/single-node scale instead of EKS + GPU scale.
 - [x] Phase 1 (full) — train/evaluate/register pipeline (custom Docker image, Argo Workflow)
 - [x] Phase 2 — MLflow model registry (self-built image, in-cluster, model registered and versioned)
 - [x] Phase 3 — model serving (FastAPI inference service, live `/predict` endpoint)
-- [ ] Phase 4 — governance (RBAC + audit log)
+- [x] Phase 4 — governance (RBAC: viewer/runner ClusterRoles + PVC-backed audit log via Argo step)
 - [ ] Phase 5 — dashboard
 - [ ] Phase 6 — docs & demo polish
+
+See [DEBUG.md](./DEBUG.md) for the full log of real issues hit and fixes
+applied while building this (RBAC, image pulls, Argo executor quirks,
+kubectl context handling, etc.) — kept separate to keep this README
+focused on what the project is and how it works.
+
+---
+
+## What's Actually Running Right Now
+
+As of Phase 4, the full loop is live on the local kind cluster:
+
+1. **Argo Workflow** (`train-iris-model.yaml`) runs as the `mini-kubogent-runner`
+   ServiceAccount and executes the `training/` container
+2. Training container trains a RandomForest on Iris, logs metrics/params to
+   **MLflow**, registers the model as `mini-kubogent-iris-classifier`, and
+   fails the pipeline if accuracy drops below a quality-gate threshold
+3. **MLflow** (self-built image, in-cluster, SQLite-backed, artifact proxying
+   enabled) stores the experiment run and the model registry
+4. **Inference Service** (FastAPI, `inference-service/`) loads the latest
+   registered model version from MLflow on startup and serves it via
+   `POST /predict`
+5. A final **audit step** in the same Workflow writes a one-line, timestamped
+   record (who/what/when/model version/accuracy/status) to a PVC-backed
+   `audit.log` — surviving pod restarts, and capturing failed quality-gate
+   runs too, not just successes
+
+This mirrors Kubogent's TRAIN → GOVERN → SERVE flow end-to-end, just at
+local/CPU/single-node scale instead of EKS + GPU scale.
+
+## Repository Structure
+
+```
+mini-kubogent/
+├── POC.md                 # motive, plan, non-goals
+├── README.md               # this file
+├── setup.md                 # step-by-step environment setup (Phase 0+)
+├── DEBUG.md                  # full troubleshooting log
+├── rbac/                      # Phase 4 - RBAC roles + audit log PVC
+│   ├── viewer-role.yaml
+│   ├── pipeline-runner-role.yaml
+│   └── audit-pvc.yaml
+├── argo-pipelines/             # Argo Workflow YAMLs
+│   ├── hello-world.yaml
+│   └── train-iris-model.yaml    # includes train + audit steps
+├── mlflow/                       # MLflow server image + K8s manifests
+│   ├── Dockerfile
+│   └── mlflow-deployment.yaml
+├── training/                      # Model Workbench - training container
+│   ├── train.py                    # writes accuracy/model_version outputs for audit
+│   ├── requirements.txt
+│   └── Dockerfile
+├── inference-service/               # SERVE use case - FastAPI model endpoint
+│   ├── main.py
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── deployment.yaml
+├── dashboard/                         # Cluster Dashboard (Phase 5, in progress)
+└── scripts/                            # helper scripts
+```

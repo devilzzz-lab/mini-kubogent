@@ -24,6 +24,19 @@ EXPERIMENT_NAME = os.environ.get("MLFLOW_EXPERIMENT", "mini-kubogent")
 N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 50))
 MAX_DEPTH = int(os.environ.get("MAX_DEPTH", 5))
 
+# Where Argo will read step outputs from (audit log needs these)
+OUTPUT_DIR = "/tmp/outputs"
+
+
+def write_outputs(accuracy, model_version):
+    """Write step outputs to disk so Argo can capture them as
+    outputs.parameters and pass them to the audit-log step."""
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    with open(os.path.join(OUTPUT_DIR, "accuracy.txt"), "w") as f:
+        f.write(f"{accuracy:.4f}")
+    with open(os.path.join(OUTPUT_DIR, "model_version.txt"), "w") as f:
+        f.write(str(model_version))
+
 
 def main():
     print(f"Connecting to MLflow at {MLFLOW_TRACKING_URI}")
@@ -56,22 +69,29 @@ def main():
         mlflow.log_metric("accuracy", acc)
         mlflow.log_metric("f1_macro", f1)
 
-        mlflow.sklearn.log_model(
+        model_info = mlflow.sklearn.log_model(
             model,
             artifact_path="model",
             registered_model_name="mini-kubogent-iris-classifier",
         )
 
+        # registered_model_version is set because registered_model_name was passed above
+        model_version = model_info.registered_model_version
+
         run_id = run.info.run_id
         print(f"MLflow run_id: {run_id}")
+        print(f"Registered model version: {model_version}")
 
         # Fail the pipeline step if quality gate isn't met (evaluation gate)
         MIN_ACCURACY = float(os.environ.get("MIN_ACCURACY", 0.85))
         if acc < MIN_ACCURACY:
             print(f"FAILED quality gate: accuracy {acc:.4f} < {MIN_ACCURACY}")
+            # Still write outputs so a failed run is auditable too
+            write_outputs(acc, model_version)
             sys.exit(1)
 
         print("Model passed quality gate and was registered in MLflow.")
+        write_outputs(acc, model_version)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # setup.md — Mini Kubogent
 
-Verified, working command sequence, Phase 0 through Phase 3. Every command
+Verified, working command sequence, Phase 0 through Phase 4. Every command
 here was actually run successfully in order — see [DEBUG.md](./DEBUG.md)
 for the issues hit along the way and why some steps look the way they do.
 
@@ -200,11 +200,73 @@ Expected response:
 {"prediction_index":0,"prediction_class":"setosa","model_uri":"models:/mini-kubogent-iris-classifier/latest"}
 ```
 
+✅ At this point: `train → register → serve → live prediction` all work
+end-to-end on the local cluster.
+
 ---
 
-✅ At this point: `train → register → serve → live prediction` all work
-end-to-end on the local cluster. Move on to Phase 4 (governance/RBAC +
-audit log) next.
+## Phase 4 — Governance (RBAC + Audit Log)
+
+### Apply the RBAC roles
+```bash
+kubectl apply -f rbac/viewer-role.yaml
+kubectl apply -f rbac/pipeline-runner-role.yaml
+```
+This creates two ClusterRoles, each bound to its own ServiceAccount in the
+`argo` namespace:
+- `mini-kubogent-viewer` — read-only (pods, workflows, deployments)
+- `mini-kubogent-runner` — can submit/watch/delete workflows
+
+### Verify least-privilege actually holds
+```bash
+# viewer should NOT be able to submit workflows
+kubectl auth can-i create workflows.argoproj.io \
+  --as=system:serviceaccount:argo:mini-kubogent-viewer -n argo
+# expect: no
+
+# runner SHOULD be able to
+kubectl auth can-i create workflows.argoproj.io \
+  --as=system:serviceaccount:argo:mini-kubogent-runner -n argo
+# expect: yes
+```
+
+### Create the audit log PVC
+```bash
+kubectl apply -f rbac/audit-pvc.yaml
+```
+
+### Rebuild the training image (now writes accuracy/model_version output files)
+```bash
+cd training
+docker build -t mini-kubogent/train:latest .
+cd ..
+kind load docker-image mini-kubogent/train:latest --name cloudops
+```
+
+### Run the pipeline (train + audit steps, runs as mini-kubogent-runner)
+```bash
+argo submit -n argo argo-pipelines/train-iris-model.yaml --watch
+argo logs -n argo @latest
+```
+Expected: training logs as before, plus a final `log-audit` step printing
+the audit line it just wrote, e.g.:
+```
+2026-07-25T10:04:04Z,sa=mini-kubogent-runner,workflow=train-iris-model-kxpkj,status=Succeeded,model_version=2,accuracy=1.0000
+```
+
+### Read the full audit trail anytime
+```bash
+kubectl -n argo run audit-viewer --rm -it --restart=Never --image=busybox \
+  --overrides='{"spec":{"containers":[{"name":"audit-viewer","image":"busybox","command":["cat","/audit/audit.log"],"volumeMounts":[{"name":"audit-log","mountPath":"/audit"}]}],"volumes":[{"name":"audit-log","persistentVolumeClaim":{"claimName":"audit-log-pvc"}}]}}'
+```
+This spins up a throwaway pod that mounts the same PVC, cats the log, and
+deletes itself — the log itself persists on the PVC regardless.
+
+---
+
+✅ At this point: RBAC roles are enforced and every pipeline run — success
+or quality-gate failure — leaves a durable audit record. Move on to
+Phase 5 (Streamlit dashboard) next.
 
 If anything here fails, check [DEBUG.md](./DEBUG.md) first — most issues
 that come up repeating this setup have already been hit and documented

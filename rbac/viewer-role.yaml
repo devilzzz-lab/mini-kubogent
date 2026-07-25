@@ -1,0 +1,35 @@
+# Read-only role — can view pods, workflows, and pipeline results,
+# but cannot create/submit/delete anything.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mini-kubogent-viewer
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflowtemplates", "workflowtaskresults"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mini-kubogent-viewer
+  namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mini-kubogent-viewer-binding
+subjects:
+  - kind: ServiceAccount
+    name: mini-kubogent-viewer
+    namespace: argo
+roleRef:
+  kind: ClusterRole
+  name: mini-kubogent-viewer
+  apiGroup: rbac.authorization.k8s.io
