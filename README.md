@@ -1,38 +1,27 @@
 # Mini Kubogent
 
-A local, hands-on proof of concept built to **study how Aivar's Kubogent AI
-service works** — implemented on a local `kind` Kubernetes cluster instead
-of production EKS + GPU infrastructure.
+A local, hands-on proof of concept built to **study how Aivar's Kubogent AI service works** — implemented on a local `kind` Kubernetes cluster instead of production EKS + GPU infrastructure.
 
-> This is a learning project, not a commercial clone. Where a real
-> Kubogent feature needs cloud GPUs, EKS, or enterprise networking that a
-> laptop can't provide, it is documented conceptually below instead of
-> faked.
+> This is a learning project, not a commercial clone. See [POC.md](./POC.md) for the full motive, plan, and non-goals.
 
 ---
 
-## Why this project exists
+## Why This Project Exists
 
-Kubogent AI is Aivar's product for running enterprise AI/ML workloads on
-Kubernetes (EKS), with governance, GPU management, and MLOps tooling built
-in. Reading their marketing page alone doesn't teach you how the pieces
-actually work — so this project rebuilds the *core mechanics* (pipeline →
-registry → serving → dashboard) locally, using the same open-source
-building blocks Kubogent is very likely built on (Argo, MLflow, Kubernetes
-primitives), so the concepts can be demonstrated and explained properly.
+- Kubogent AI is Aivar's product for running enterprise AI/ML workloads on Kubernetes (EKS), with governance, GPU management, and MLOps tooling built in.
+- Reading the marketing page alone doesn't teach you how the pieces actually work.
+- This project rebuilds the **core mechanics** — pipeline → registry → serving → dashboard — locally.
+- Uses the same open-source building blocks Kubogent is likely built on: Argo, MLflow, and native Kubernetes primitives.
 
-## What Kubogent actually does (recap)
+## What Kubogent Actually Does
 
-Kubogent = **Kubernetes + Agent**. It turns EKS into a governed platform
-where a company can fine-tune, register, deploy, and monitor its own AI
-models on its own infrastructure — instead of calling an external LLM API.
-You bring your AWS account and your GPUs; Kubogent configures the platform
-layer on top: pipelines, registry, dashboard, security, and multi-tenant
-GPU sharing.
+- **Kubogent = Kubernetes + Agent.**
+- Turns EKS into a governed platform where a company can fine-tune, register, deploy, and monitor its own AI models on its own infrastructure — instead of calling an external LLM API.
+- You bring your AWS account and GPUs; Kubogent configures the platform layer on top: pipelines, registry, dashboard, security, and multi-tenant GPU sharing.
 
 ---
 
-## Full feature list on the Kubogent page vs. this project
+## Full Feature List: Kubogent Page vs. This Project
 
 | # | Kubogent Feature (from aivar.tech) | In this project? | How |
 |---|---|---|---|
@@ -52,7 +41,7 @@ GPU sharing.
 
 ---
 
-## Buildable vs. Conceptual-only — summary table
+## Buildable vs. Conceptual-Only — Summary Table
 
 | Category | Local kind cluster? | Why / why not |
 |---|---|---|
@@ -70,127 +59,92 @@ GPU sharing.
 
 ---
 
+## Tech Stack
+
+- **Cluster** — kind (Kubernetes in Docker)
+- **Orchestration** — Argo Workflows
+- **Model Registry** — MLflow
+- **Serving** — FastAPI + Kubernetes Deployment/Service
+- **Dashboard** — Streamlit
+- **Governance** — Kubernetes RBAC + simple audit log
+
+---
+
 ## Project Phases
 
-### Phase 0 — Environment setup
-- Install `kind`, `kubectl`, `docker`, `helm`
-- Create local cluster: `kind create cluster --name mini-kubogent`
+- **Phase 0 — Environment Setup**
+  👉 Full step-by-step commands: [setup.md](./setup.md)
 
-### Phase 1 — Pipeline orchestration (Argo Workflows)
-- Install Argo Workflows on the cluster
-- Write a Workflow YAML: fetch data → train tiny model → evaluate → log to MLflow
-- Trigger and verify a run via `argo submit`
+- **Phase 1 — Pipeline Orchestration (Argo Workflows)**
+  - Install Argo Workflows on the cluster
+  - Write a Workflow YAML: fetch data → train tiny model → evaluate → log to MLflow
+  - Trigger and verify a run via `argo submit`
 
-### Phase 2 — Model registry (MLflow)
-- Deploy MLflow tracking server in-cluster
-- Pipeline logs metrics, parameters, and registers the trained model
-- Verify model version appears in the MLflow UI
+- **Phase 2 — Model Registry (MLflow)**
+  - Deploy MLflow tracking server in-cluster
+  - Pipeline logs metrics, parameters, and registers the trained model
+  - Verify model version appears in the MLflow UI
 
-### Phase 3 — Model serving
-- Package the registered model into a small FastAPI inference service
-- Deploy as a Kubernetes Deployment + Service
-- Test with a `curl`/Postman request to get a live prediction
+- **Phase 3 — Model Serving**
+  - Package the registered model into a small FastAPI inference service
+  - Deploy as a Kubernetes Deployment + Service
+  - Test with a `curl`/Postman request to get a live prediction
 
-### Phase 4 — Governance basics
-- Apply Kubernetes RBAC roles (e.g. read-only vs. pipeline-runner roles)
-- Log every pipeline run (who/when/what model version) to a simple audit
-  log file or table
+- **Phase 4 — Governance Basics**
+  - Apply Kubernetes RBAC roles (read-only vs. pipeline-runner)
+  - Log every pipeline run (who/when/what model version) to a simple audit log
 
-### Phase 5 — Dashboard
-- Build a Streamlit app that shows:
+- **Phase 5 — Dashboard**
   - Live pod/job status (via Kubernetes API)
   - Registered model versions (via MLflow API)
   - A clearly-labeled "simulated" GPU utilization / cost panel
 
-### Phase 6 — Documentation & demo polish
-- Finalize README + POC
-- Record/demo: run pipeline → show registry update → hit live endpoint → show dashboard
+- **Phase 6 — Documentation & Demo Polish**
+  - Finalize README + POC
+  - Record/demo: run pipeline → show registry update → hit live endpoint → show dashboard
 
 ---
 
-## Concepts NOT built here — explained for study
+## Concepts Not Built Here — Explained for Study
 
-These are real Kubogent capabilities that require cloud GPU hardware or
-enterprise-grade networking that a local `kind` cluster cannot provide.
-They're documented here so they can still be understood and spoken to.
+Real Kubogent capabilities that need cloud GPU hardware or enterprise-grade networking a local `kind` cluster can't provide. Documented so they can still be understood and spoken to.
 
 ### GPU Partitioning / A100s / MIG
-Modern NVIDIA GPUs (like the A100) support **MIG (Multi-Instance GPU)**,
-which lets a single physical GPU be split into several isolated
-GPU-instances, each with its own dedicated memory and compute slice. This
-lets a platform like Kubogent run multiple models/tenants on one GPU
-without them interfering with each other — much better utilization than
-giving one whole GPU to one job. This requires real NVIDIA data-center
-GPUs and the NVIDIA GPU Operator on Kubernetes; it cannot be simulated on
-a laptop without a compatible GPU.
+- MIG (Multi-Instance GPU) lets a single physical GPU be split into isolated instances, each with dedicated memory and compute.
+- Lets a platform like Kubogent run multiple models/tenants on one GPU without interference.
+- Needs real NVIDIA data-center GPUs + the NVIDIA GPU Operator on Kubernetes — can't be simulated on a laptop.
 
-### Why "Multi-cloud" / "Zero vendor lock-in"
-Because Kubogent is built on Kubernetes-native, open tooling (Argo,
-MLflow-compatible registries, standard K8s APIs) rather than
-cloud-proprietary services, the same platform config can in theory be
-deployed on AWS EKS, Azure AKS, GCP GKE, or on-prem clusters with minimal
-changes. The claim is architectural — it's not something a single demo
-"runs," it's a property of using standard K8s primitives instead of
-AWS-only managed services.
+### Multi-Cloud / Zero Vendor Lock-In
+- Kubogent is built on Kubernetes-native, open tooling (Argo, MLflow-compatible registries, standard K8s APIs) rather than cloud-proprietary services.
+- Same platform config can in theory deploy on EKS, AKS, GKE, or on-prem with minimal changes.
+- It's an architectural property of using standard K8s primitives — not something a single demo "runs."
 
 ### Service Mesh for AI
-A service mesh (e.g. **Istio**, **Linkerd**) is a networking layer that
-sits alongside your services (usually via sidecar containers) and handles
-traffic routing, retries, load balancing, mutual TLS, and observability
-between services — without changing application code. For AI workloads,
-this is used for things like canary-deploying a new model version,
-routing a percentage of traffic to it, and monitoring latency/errors per
-model version automatically. Istio *can* run on `kind`, but is deliberately
-left out of this POC to keep it lightweight and fast to build; the
-orchestration and registry pieces demonstrate the same underlying
-platform-engineering skill.
+- A service mesh (Istio, Linkerd) sits alongside services (usually via sidecars) and handles routing, retries, load balancing, mTLS, and observability — without changing app code.
+- For AI workloads: canary-deploying a new model version, routing a % of traffic to it, monitoring latency/errors per version.
+- Istio *can* run on `kind`, but is deliberately left out here to keep the POC lightweight; orchestration + registry pieces already demonstrate the same platform-engineering skill.
 
 ### Micro-VM Isolation
-Technologies like **Firecracker** (used by AWS Lambda/Fargate) or **Kata
-Containers** run each workload inside a lightweight virtual machine
-instead of a standard Linux container. Containers share the host kernel;
-micro-VMs don't — giving much stronger security isolation between
-tenants, which matters a lot when different customers' fine-tuning jobs
-run on the same physical node. This needs a specific container runtime
-setup at the node level and isn't practical to demonstrate inside Docker-
-in-Docker (`kind` itself runs nodes as containers).
+- Firecracker (used by AWS Lambda/Fargate) or Kata Containers run each workload inside a lightweight VM instead of a standard container.
+- Containers share the host kernel; micro-VMs don't — much stronger tenant isolation.
+- Needs specific node-level container runtime config; not practical inside Docker-in-Docker (`kind` runs nodes as containers).
 
 ### Zero-Latency Scaling
-Marketing term for fast, predictive autoscaling of inference endpoints to
-handle demand spikes without cold-start delay — typically implemented via
-Kubernetes Horizontal Pod Autoscaler (HPA) combined with pre-warmed pod
-pools or KEDA event-driven scaling. Conceptually related to Kubernetes HPA,
-but "zero-latency" pre-warming at scale needs real traffic patterns and
-cloud infra to demonstrate meaningfully.
+- Marketing term for fast, predictive autoscaling of inference endpoints without cold-start delay.
+- Typically implemented via Kubernetes HPA + pre-warmed pod pools, or KEDA event-driven scaling.
+- "Zero-latency" pre-warming at scale needs real traffic patterns and cloud infra to demonstrate meaningfully.
 
 ### Kubeflow
-Kubeflow is a full ML platform for Kubernetes — it includes Jupyter
-notebook management, **Kubeflow Pipelines** (which is actually built on
-top of Argo Workflows), model serving (KServe), and hyperparameter tuning
-(Katib). Kubogent's FAQ mentions compatibility with Kubeflow, MLflow, and
-Argo. This project uses **Argo Workflows directly** instead of installing
-full Kubeflow, since Kubeflow Pipelines itself runs on Argo under the
-hood — using Argo directly demonstrates the same orchestration mechanics
-with far less setup overhead and resource usage, which matters on a local
-cluster.
+- Full ML platform for Kubernetes: Jupyter notebook management, Kubeflow Pipelines (built on Argo Workflows), model serving (KServe), hyperparameter tuning (Katib).
+- This project uses **Argo Workflows directly** instead of full Kubeflow, since Kubeflow Pipelines itself runs on Argo under the hood.
+- Same orchestration mechanics, far less setup overhead — matters on a local cluster.
 
-### Real cost / billing visibility
-Kubogent's dashboard shows real GPU cost tracking against actual AWS
-billing data. Locally, there's no real cloud spend to track, so the
-dashboard here shows illustrative/mocked numbers, clearly labeled as such.
+### Real Cost / Billing Visibility
+- Kubogent's dashboard shows real GPU cost tracking against actual AWS billing data.
+- No real cloud spend locally, so the dashboard shows illustrative/mocked numbers, clearly labeled as such.
 
 ---
-
-## Tech Stack
-
-- **Cluster**: kind (Kubernetes in Docker)
-- **Orchestration**: Argo Workflows
-- **Model Registry**: MLflow
-- **Serving**: FastAPI + Kubernetes Deployment/Service
-- **Dashboard**: Streamlit
-- **Governance**: Kubernetes RBAC + simple audit log
 
 ## Status
 
-🚧 In progress — see POC.md for scope, and phase checklist above for
-current progress.
+🚧 In progress — see [POC.md](./POC.md) for the motive and plan, and the phase checklist above for current progress.
